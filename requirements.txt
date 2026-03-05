@@ -1,4 +1,12 @@
 python-telegram-bot==20.8
 soundfile
 librosa
+numpy<2.0.0
+huggingface-hub
+phonemizer
+num2words
+spacy
+espeakng-loader
+onnxruntime
+scipy
 https://github.com/KittenML/KittenTTS/releases/download/0.8/kittentts-0.8.0-py3-none-any.whl
