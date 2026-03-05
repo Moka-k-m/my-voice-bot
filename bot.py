@@ -27,7 +27,7 @@ RUN_HOURS = int(os.environ.get("RUN_HOURS", 5))
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-AVAILABLE_VOICES = ["Bella", "Hugo", "Leo", "Kiki", "Luna", "Rosie", "Sara", "Tony"]
+AVAILABLE_VOICES = ["expr-voice-2-m", "expr-voice-2-f", "expr-voice-3-m", "expr-voice-3-f", "expr-voice-4-m", "expr-voice-4-f", "expr-voice-5-m", "expr-voice-5-f"]
 DEFAULT_VOICE = "Bella"
 SPEED_RATE = 1.2
 user_preferences = {}
