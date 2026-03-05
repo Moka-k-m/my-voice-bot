@@ -1,63 +1,130 @@
+import logging
 import os
-import soundfile as sf
+import tempfile
+import sys
 import asyncio
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
-from kittentts import KittenTTS
+import nest_asyncio
+import soundfile as sf
+import numpy as np
+from pydub import AudioSegment
 
-# 1. التوكن بتاعك 🔑
-TOKEN = "8798797433:AAHAbBMPIuihteiiwHEfch80bUu6uSPZ38g"
+# السماح بتشغيل asyncio
+nest_asyncio.apply()
 
-# 2. استدعاء القطة 🐈
-print("جاري شحن حنجرة القطة... 🐾")
-# ملحوظة: التحميل بيتم من Hugging Face Hub تلقائياً
-model = KittenTTS("KittenML/kitten-tts-mini-0.8")
+try:
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+    from kittentts import KittenTTS
+except ImportError as e:
+    print(f"Error importing: {e}")
+    sys.exit(1)
 
-VOICES = ['Bella', 'Hugo', 'Leo', 'Kiki', 'Luna', 'Rosie']
+# --- الإعدادات ---
+# هنقرأ التوكن من متغيرات البيئة (للأمان)
+TOKEN = os.environ.get("TOKEN")
 
-# --- الوظائف البرمجية ---
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO,
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    await update.message.reply_text(f"يا أهلاً بك يا {user.first_name}! 🐾\nأنا قطتك الناطقة. اكتب لي أي نص بالإنجليزية وسأنطقه لك.\nأو استخدم /voice لتغيير الشخصية.")
+AVAILABLE_VOICES = ["Bella", "Hugo", "Leo", "Kiki", "Luna", "Rosie", "Sara", "Tony"]
+DEFAULT_VOICE = "Bella"
+SPEED_RATE = 1.2
+user_preferences = {}
 
-async def voice_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [[InlineKeyboardButton(v, callback_data=v)] for v in VOICES]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("اختر الحنجرة التي تفضلها اليوم: 🎙️", reply_markup=reply_markup)
+# --- محرك الصوت ---
+class TTSEngine:
+    def __init__(self):
+        logger.info("Loading Model...")
+        self.model = None
+        try:
+            self.model = KittenTTS("KittenML/kitten-tts-mini-0.8")
+            logger.info("Model Loaded Successfully.")
+        except Exception as e:
+            logger.error(f"Model Load Failed: {e}")
 
-async def select_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    context.user_data['voice'] = query.data
-    await query.edit_message_text(f"تم اختيار الصوت: {query.data} ✅.. القطة جاهزة!")
+    def generate_audio(self, text: str, voice: str, speed: float):
+        if not self.model: raise Exception("Model not ready")
+        
+        temp_wav = tempfile.mktemp(suffix=".wav")
+        temp_ogg = tempfile.mktemp(suffix=".ogg")
+        
+        try:
+            wav_array = self.model.generate(text, voice=voice, speed=speed)
+            sf.write(temp_wav, wav_array, 24000)
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    selected_voice = context.user_data.get('voice', 'Bella')
-    
-    await update.message.reply_text(f"جاري تحويل النص لصوت {selected_voice}... 🎤")
+            sound = AudioSegment.from_file(temp_wav)
+            new_rate = int(sound.frame_rate * speed)
+            sound = sound._spawn(sound.raw_data, overrides={"frame_rate": new_rate}).set_frame_rate(sound.frame_rate)
+            sound.export(temp_ogg, format="ogg", codec="libopus")
+
+            return temp_ogg
+        except Exception as e:
+            logger.error(f"Gen Error: {e}")
+            return None
+        finally:
+            if os.path.exists(temp_wav): os.remove(temp_wav)
+
+tts_engine = TTSEngine()
+
+# --- دوال البوت ---
+def get_voice_keyboard():
+    keyboard = [
+        [InlineKeyboardButton(v, callback_data=f"voice_{v}") for v in AVAILABLE_VOICES[:4]],
+        [InlineKeyboardButton(v, callback_data=f"voice_{v}") for v in AVAILABLE_VOICES[4:]]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+async def start(u, c): 
+    user_preferences[u.effective_user.id] = DEFAULT_VOICE
+    await u.message.reply_text(f"👋 Bot Active on Hugging Face!\nVoice: {DEFAULT_VOICE}\n/voices to change.")
+
+async def voices_cmd(u, c): await u.message.reply_text("🎤 Choose:", reply_markup=get_voice_keyboard())
+
+async def voice_cb(u, c):
+    q = u.callback_query
+    await q.answer()
+    v = q.data.split("_")[1]
+    user_preferences[u.effective_user.id] = v
+    await q.edit_message_text(f"✅ Selected: {v}")
+
+async def text_handler(u, c):
+    uid = u.effective_user.id
+    txt = u.message.text
+    v = user_preferences.get(uid, DEFAULT_VOICE)
+    msg = await u.message.reply_text("⏳ Processing...")
     
     try:
-        # توليد الصوت
-        wav = model.generate(text, voice=selected_voice, speed=1.3)
-        sf.write('temp.wav', wav, 24000)
-        
-        # تحويل الملف باستخدام ffmpeg (لازم يكون مثبت في الـ Docker)
-        os.system("ffmpeg -i temp.wav -c:a libopus voice.ogg -y")
-        
-        with open('voice.ogg', 'rb') as v:
-            await update.message.reply_voice(voice=v)
+        audio = tts_engine.generate_audio(txt, v, SPEED_RATE)
+        if audio:
+            await u.message.reply_voice(open(audio, 'rb'), caption=f"🔊 {v}")
+            await msg.delete()
+            os.remove(audio)
+        else: await msg.edit_text("❌ Error.")
     except Exception as e:
-        await update.message.reply_text(f"حصلت مشكلة يا صديقي: {e} 🙀")
+        logger.error(e)
+        await msg.edit_text("❌ Failed.")
 
-if __name__ == '__main__':
-    print("البوت بدأ العمل.. روح كلمه على تليجرام! 🚀")
+def main():
+    if not TOKEN:
+        logger.error("TOKEN not found in environment variables!")
+        return
+
+    logger.info("Starting Bot on Hugging Face Space...")
+    
+    # ملاحظة هامة: في Hugging Face نستخدم webhook أحياناً، لكن polling يعمل جيداً في Docker
     app = Application.builder().token(TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("voice", voice_menu))
-    app.add_handler(CallbackQueryHandler(select_voice))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(CommandHandler("voices", voices_cmd))
+    app.add_handler(CallbackQueryHandler(voice_cb))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     
-    app.run_polling()
+    # التشغيل
+    app.run_polling(drop_pending_updates=True)
+
+if __name__ == "__main__":
+    main()
