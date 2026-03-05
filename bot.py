@@ -28,7 +28,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 AVAILABLE_VOICES = ["expr-voice-2-m", "expr-voice-2-f", "expr-voice-3-m", "expr-voice-3-f", "expr-voice-4-m", "expr-voice-4-f", "expr-voice-5-m", "expr-voice-5-f"]
-DEFAULT_VOICE = "Bella"
+DEFAULT_VOICE = "expr-voice-2-m"
 SPEED_RATE = 1.2
 user_preferences = {}
 
