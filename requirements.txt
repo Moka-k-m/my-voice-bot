@@ -1,0 +1,4 @@
+python-telegram-bot==20.8
+soundfile
+librosa
+https://github.com/KittenML/KittenTTS/releases/download/0.8/kittentts-0.8.0-py3-none-any.whl
